@@ -132,6 +132,7 @@ def nms(output, nms_th, num_bbox):
     bboxes = [output[0]]
     for i in np.arange(1, len(output)):
         bbox = output[i]
+        print('bbox', bbox)
         if bbox[1] > y_max or bbox[1] < y_min or bbox[2] > x_max or bbox[2] < x_min or bbox[3] > z_max or bbox[3] < z_min:
             continue
         else:
@@ -148,7 +149,7 @@ def nms(output, nms_th, num_bbox):
     return bboxes
     
 
-def postprocess(pred_raw, conf_th = -1, nms_th = 0.02, topk = 25, num_bbox = 50):
+def postprocess(pred_raw, conf_th=-1, nms_th=0.02, topk=25, num_bbox=50):
     pred_raw = pred_raw[pred_raw[:, 0] >= conf_th]
     pred_nms = nms(pred_raw, nms_th, num_bbox)
     sorted(pred_nms,key=lambda x:x[0])
@@ -159,7 +160,7 @@ def postprocess(pred_raw, conf_th = -1, nms_th = 0.02, topk = 25, num_bbox = 50)
 
 def read_nib(path):
     img=nib.load(path)
-    img_arr=img.get_data().transpose(2,1,0)
+    img_arr=img.get_data()
     return img_arr    
 
 

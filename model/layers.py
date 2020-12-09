@@ -123,16 +123,17 @@ class Loss(nn.Module):
                 self.regress_loss(pw, lw),
                 self.regress_loss(pd, ld)]
             regress_losses_data = [l.item() for l in regress_losses]
-            classify_loss = 0.5 * self.classify_loss(
-            pos_prob, pos_labels[:, 0]) + 0.5 * self.classify_loss(
-            neg_prob, neg_labels + 1)
+            classify_loss = 0.5 * self.classify_loss(pos_prob, pos_labels[:, 0]) + \
+                            0.5 * self.classify_loss(neg_prob, neg_labels + 1)
             pos_correct = (pos_prob.data >= 0.5).sum()
             pos_total = len(pos_prob)
 
+            # print('Output', pos_output[:, 1:4].cpu().detach().numpy(), 'prob', pos_prob.cpu().detach().numpy())
+            # print('label', pos_labels[:, 1:4].cpu().numpy())
+
         else:
             regress_losses = [0,0,0,0]
-            classify_loss =  0.5 * self.classify_loss(
-            neg_prob, neg_labels + 1)
+            classify_loss =  0.5 * self.classify_loss(neg_prob, neg_labels + 1)
             pos_correct = 0
             pos_total = 0
             regress_losses_data = [0,0,0,0]
@@ -153,7 +154,7 @@ class GetPBB(object):
         self.stride = config['stride']
         self.anchors = np.asarray(config['anchors'])
 
-    def __call__(self, output,thresh = -3, ismask=False):
+    def __call__(self, output, thresh=-3, ismask=False):
         stride = self.stride
         anchors = self.anchors
         output = np.copy(output)

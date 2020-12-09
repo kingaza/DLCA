@@ -12,8 +12,6 @@ import torch
 from torch.nn import DataParallel
 from torch.backends import cudnn
 from torch.utils.data import DataLoader
-from torch import optim
-from torch.autograd import Variable
 
 
 parser = argparse.ArgumentParser(description='ca detection')
@@ -23,7 +21,7 @@ parser.add_argument('-j', '--workers', default=0, type=int, metavar='N',
                     help='number of data loading workers (default: 32)')
 parser.add_argument('-b', '--batch-size', default=1, type=int,
                     metavar='N', help='mini-batch size (default: 16)')
-parser.add_argument('--resume', default='', type=str, metavar='PATH',
+parser.add_argument('--checkpoint', default='', type=str, metavar='PATH',
                     help='path to latest checkpoint (default: none)')
 parser.add_argument('--input', default='', type=str, metavar='data',
                     help='directory to save images (default: none)')
@@ -34,35 +32,37 @@ parser.add_argument('--test', default=1, type=int, metavar='TEST',
 parser.add_argument('--n_test', default=1, type=int, metavar='N',
                     help='number of gpu for test')
 
+args = parser.parse_args()
+print(args)
+
 
 def main():
-    global args
-    args = parser.parse_args()
-    torch.manual_seed(0)
+    test_name = os.path.basename(args.input)
+    data_dir = os.path.dirname(args.input)
+    save_dir = os.path.dirname(args.output)
 
-    model = import_module(args.model)
-    config, net, loss, get_pbb = model.get_model()
-    test_name = (args.input).split("/")[-1]
-    data_dir = (args.input).split("/")[-2]
-    save_dir = (args.output).split("/")[-2]
-
-    if args.resume:
-        checkpoint = torch.load(args.resume)
-        net.load_state_dict(checkpoint['state_dict'])
-    
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
     logfile = os.path.join(save_dir, 'log')
-    
-    net = net.cuda()
-    loss = loss.cuda()
-    cudnn.benchmark = True
-    net = DataParallel(net)
-    
-    margin = config["margin"]
-    sidelen = config["split_size"]
 
-    split_comber = SplitComb(sidelen,config['max_stride'],config['stride'],margin,config['pad_value'])
+    torch.manual_seed(0)
+    model = import_module(args.model)
+    config, net, loss, get_pbb = model.get_model()
+
+    if args.checkpoint:
+        checkpoint = torch.load(args.checkpoint)
+        net.load_state_dict(checkpoint['state_dict'])
+    
+    cudnn.benchmark = True
+    net = net.cuda()
+    net = DataParallel(net)
+    loss = loss.cuda()
+
+    split_comber = SplitComb(config["split_size"],
+                             config['max_stride'],
+                             config['stride'],
+                             config["margin"],
+                             config['pad_value'])
     dataset = data.TestDetector(
         data_dir,
         test_name,
@@ -85,36 +85,42 @@ def test(data_loader, net, get_pbb, save_dir, config):
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
     print(save_dir)
+
     net.eval()
     split_comber = data_loader.dataset.split_comber
-    for i_name, (data, coord, nzhw) in enumerate(data_loader):
-        nzhw = nzhw[0]
-        name = data_loader.dataset.filenames[i_name].split('-')[0].split('/')[-1]
+    for idx_data, (data, coord, nzhw) in enumerate(data_loader):
+        data_name = data_loader.dataset.filenames[idx_data].split('-')[0].split('/')[-1]
+        print([idx_data,data_name])
+        
+        print(data[0].shape, coord[0].shape, nzhw[0].shape)
+
         data = data[0][0]
         coord = coord[0][0]
-        n_per_run = args.n_test
+        nzhw = nzhw[0]
         print(data.size())
-        splitlist = range(0,len(data)+1,n_per_run)
+
+        splitlist = range(0, len(data)+1, args.n_test)
         if splitlist[-1]!=len(data):
             splitlist.append(len(data))
         outputlist = []
-        for i in range(len(splitlist)-1):
-            input = Variable(data[splitlist[i]:splitlist[i+1]], volatile = True).cuda()
-            inputcoord = Variable(coord[splitlist[i]:splitlist[i+1]], volatile = True).cuda()
 
-            output = net(input,inputcoord)
+        for i in range(len(splitlist)-1):
+            print('predict {}-th split'.format(i+1))
+            input_data = data[splitlist[i]:splitlist[i+1]].cuda()
+            input_coord = coord[splitlist[i]:splitlist[i+1]].cuda()
+
+            output = net(input_data,input_coord)
             outputlist.append(output.data.cpu().numpy())
+            
         output = np.concatenate(outputlist,0)
         output = split_comber.combine(output,nzhw=nzhw)
 
-        thresh = -3
-        pbb,mask = get_pbb(output,thresh,ismask=True)
-        print([i_name,name])
+        pbb, mask = get_pbb(output, thresh=-3, ismask=True)
         pbb_nms = postprocess(pbb)
-        np.save(os.path.join(save_dir, name+'_pbb.npy'), pbb_nms)
-        
-        print("start plot prediction boxes")
-        plot_box(name, pbb_nms)
+        print('pbb_nms', pbb_nms)
+
+        np.save(os.path.join(save_dir, data_name+'_pbb.npy'), pbb_nms)
+        plot_box(data_name, pbb_nms)
     
 
 if __name__ == '__main__':

@@ -12,8 +12,6 @@ import torch
 from torch.nn import DataParallel
 from torch.backends import cudnn
 from torch.utils.data import DataLoader
-from torch import optim
-from torch.autograd import Variable
 
 
 parser = argparse.ArgumentParser(description='ca detection')
@@ -46,10 +44,9 @@ parser.add_argument('--test', default=0, type=int, metavar='TEST',
 parser.add_argument('--gpu', default='2, 3', type=str, metavar='N',
                     help='use gpu')
 
+args = parser.parse_args()
 
 def main():
-    global args
-    args = parser.parse_args()
     start_epoch = args.start_epoch
     data_dir = args.input   
     save_dir = args.output
@@ -83,9 +80,12 @@ def main():
         for f in pyfiles:
             shutil.copy(f, os.path.join(save_dir, f))
 
+
+    print(args)            
+
     net = net.cuda()
     loss = loss.cuda()
-    cudnn.benchmark = True
+    # cudnn.benchmark = True
     net = DataParallel(net)
 
     dataset = data.TrainDetector(
@@ -106,9 +106,9 @@ def main():
         weight_decay=args.weight_decay)
 
     def get_lr(epoch):
-        if epoch <= 80:#args.epochs * 0.8:
+        if epoch <= 80:    # epochs * 0.8:
             lr = args.lr
-        elif epoch <= 120:#args.epochs * 0.9:
+        elif epoch <= 150:  # epochs * 0.9:
             lr = 0.1 * args.lr
         else:
             lr = 0.01 * args.lr
@@ -144,9 +144,9 @@ def train(data_loader, net, loss, epoch, optimizer, get_lr, save_freq, save_dir)
     metrics = []
     for i, (data, target, coord) in enumerate(data_loader):
 
-        data = Variable(data.cuda(async=True))
-        target = Variable(target.cuda(async=True))
-        coord = Variable(coord.cuda(async=True))
+        data = data.cuda()
+        target = target.cuda()
+        coord = coord.cuda()
 
         output = net(data, coord)
         loss_output = loss(output, target)

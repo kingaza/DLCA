@@ -1,7 +1,7 @@
 # DLCA
-![detection_visu](visu.gif)
+![detection_visualization](vis_cta.gif)
 #### left: input (3D volume)
-#### right: output (3D volume. Blue boxes：predictions, red box：GT label）
+#### right: output (3D volume. Blue boxes：Predictions; Red box：GroundTrue label）
 
 ### Table of contents
 
@@ -14,12 +14,12 @@
 
 ## Introduction
 
-This repository contains the source code and the trained model for our work Deep Learning for Detecting Cerebral Aneurysms on CT Angiography.
+This repository contains the source code and the trained model for Deep Learning for Detecting Cerebral Aneurysms on CT or MR Angiography.
 
 ## Prerequisites
 - Ubuntu
-- Python 3
-- Pytorch 0.4.1
+- Python 3.x
+- Pytorch 1.6
 - NVIDIA GPU + CUDA CuDNN
 
 This repository has been tested on NVIDIA TITAN Xp. Configurations (e.g batch size, image patch size) may need to be changed on different platforms.
@@ -54,10 +54,20 @@ python train.py -j=16 -b=12 --input="train_data/" --output="./checkpoint/"
 * Run command as below.
 ```bash
 # an example with the image named "brain_CTA.nii.gz"
-python inference.py -j=1 -b=1 --resume="./checkpoint/trained_model.ckpt" --input="./test_image/brain_CTA" --output="./prediction/brain_CTA"
+python inference.py -j=1 -b=1 --checkpoint="./checkpoint/trained_model.ckpt" --input="./test_image/brain_CTA" --output="./prediction/brain_CTA"
 ```
 
-
+### 4. Fine-tune from CTA to MRA 
+* Download data of [ADAM2020 challenge](http://adam.isi.uu.nl/)
+* Pre-process data
+```bash
+python ./utils/preprocess_adam2020.py --input="./adam2020/" --output="./train_data/"
+```
+* fine-tune with pretrained model
+```bash
+python train.py -j=16 -b=12 --resume="./checkpoint/trained_model.ckpt" --input="train_data/" --output="./checkpoint/" 
+```
+Note: rescale the input data, and make the value of aneurysm region to be normalized in [0,1]
 ## Results
 
 | Sensitivity | False Positive per case |

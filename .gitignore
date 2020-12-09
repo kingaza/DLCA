@@ -1,0 +1,8 @@
+__pycache__
+
+ADAM2020/
+checkpoint/
+train_data/
+test_image/
+prediction/
+reference/

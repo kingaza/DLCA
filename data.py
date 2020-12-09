@@ -19,7 +19,7 @@ class TrainDetector(Dataset):
 
         self.patient_labels = load_label(data_dir, self.idxs)
         self.aneurysm_labels = oversample(config, self.patient_labels)
-        self.filenames = [data_dir + "{}.nii.gz".format(idx) for idx in self.idxs]
+        self.filenames = [os.path.join(data_dir, "{}.nii.gz".format(idx)) for idx in self.idxs]
     
     
     def __getitem__(self, idx):
@@ -33,16 +33,19 @@ class TrainDetector(Dataset):
             neg_sample_flag = False
 
         aneurysm_label = self.aneurysm_labels[idx]
-        patient_idx = aneurysm_label[0]
+        patient_idx = int(aneurysm_label[0])
         size = aneurysm_label[4]
 
         image_path = self.filenames[patient_idx]
-        image = load_image(image_path)
+        offset = 0.0
+        scale = 100.0
+        image = load_image(image_path, offset, scale)
         patient_label = self.patient_labels[patient_idx]
         
         crop_dict = crop_patch(image, aneurysm_label[1:], patient_label, neg_sample_flag, self.config)
         # label mapping
         sample = crop_dict["image_patch"]
+        # print('  label ->', aneurysm_label[1:4], ', size =', aneurysm_label[4])
         
         coord = crop_dict["coord"]
         aneurysm_label = crop_dict["aneurysm_label"]
@@ -53,6 +56,7 @@ class TrainDetector(Dataset):
     
         label = map_label(self.config, aneurysm_label, patient_label)
         sample = sample.astype(np.float32)
+
         return torch.from_numpy(sample), torch.from_numpy(label), coord
 
     def __len__(self):
@@ -73,9 +77,10 @@ class TestDetector(Dataset):
         # t = time.time()
         # np.random.seed(int(str(t % 1)[2:7]))
         np.random.seed(3)  
-        mean = -535.85
-        std = 846.87
-        imgs = load_image(self.filenames[idx], mean, std)
+
+        offset = 0. #-535.85
+        scale = 100. #846.87
+        imgs = load_image(self.filenames[idx], offset, scale)
         
         nz, nh, nw = imgs.shape[1:]
         pz = int(np.ceil(float(nz) / self.stride)) * self.stride
@@ -84,19 +89,22 @@ class TestDetector(Dataset):
         imgs = np.pad(imgs, [[0, 0], [0, pz - nz], [0, ph - nh], [0, pw - nw]], 'constant',
                         constant_values=self.pad_value)
 
-        xx, yy, zz = np.meshgrid(np.linspace(-0.5, 0.5, imgs.shape[1] / self.stride),
-                                    np.linspace(-0.5, 0.5, imgs.shape[2] / self.stride),
-                                    np.linspace(-0.5, 0.5, imgs.shape[3] / self.stride), indexing='ij')
+        xx, yy, zz = np.meshgrid(np.linspace(-0.5, 0.5, int(imgs.shape[1] / self.stride)),
+                                    np.linspace(-0.5, 0.5, int(imgs.shape[2] / self.stride)),
+                                    np.linspace(-0.5, 0.5, int(imgs.shape[3] / self.stride)), indexing='ij')
         coord = np.concatenate([xx[np.newaxis, ...], yy[np.newaxis, ...], zz[np.newaxis, :]], 0).astype('float32')
-        imgs, nzhw = self.split_comber.split(imgs)
+        imgs2, nzhw = self.split_comber.split(imgs)
         coord2, nzhw2 = self.split_comber.split(coord,
                                                 side_len=int(self.split_comber.side_len / self.stride),
                                                 max_stride=int(self.split_comber.max_stride / self.stride),
                                                 margin=int(self.split_comber.margin / self.stride))
         assert np.all(nzhw == nzhw2)
 
-        imgs = imgs.astype(np.float32)
-        return torch.from_numpy(imgs), torch.from_numpy(coord2), np.array(nzhw)
+        print('coord', coord.shape, '-->', coord2.shape)
+        print('images', imgs.shape, '-->', imgs2.shape)
+
+        imgs2 = imgs2.astype(np.float32)
+        return torch.from_numpy(imgs2), torch.from_numpy(coord2), np.array(nzhw)
 
     def __len__(self):
         

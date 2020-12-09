@@ -32,7 +32,7 @@ def load_label(root, name_list):
 
     for idx in name_list:
         # z h w
-        l = np.load(root + "{}.npy".format(idx))
+        l = np.load(os.path.join(root,"{}_bbox.npy".format(idx)))
         if np.all(l == 0):
             l = np.array([])
 
@@ -40,27 +40,31 @@ def load_label(root, name_list):
     return patient_labels
     
 
-def load_image_choice(image_path, mean, std):
+def load_image_choice(image_path, offset, scale):
     # w, h, z
     image = nib.load(image_path).get_fdata()
-    np.subtract(image, mean, out = image)
-    np.divide(image, std, out = image)
+    np.subtract(image, offset, out = image)
+    np.divide(image, scale, out = image)
     # z, h, w
-    image = image.transpose(2, 1, 0)
+    # shall be done before loading
+    # image = image.transpose(2, 1, 0)
     image = np.expand_dims(image, axis = 0)
     return image
     
 
-def load_image(image_path, mean, std):
+def load_image(image_path, offset, scale):
     image = nib.load(image_path).get_fdata()
-    np.subtract(image, mean, out = image)
-    np.divide(image, std, out = image)
-    image = np.moveaxis(image, 0, 1)
+    np.subtract(image, offset, out = image)
+    np.divide(image, scale, out = image)
+    # shall be done before loading
+    # image = image.transpose(2, 1, 0)
     image = np.expand_dims(image, axis=0)
     
     return image
     
-    
+
+# if no enough room for bound, reduce to bound_size/2
+# |<-- bound size -->|<-- aneurysm size --> | <-- bound size -->|    
 def gen_start(neg_sample_flag, aneurysm_label, bound_size, crop_size, image_shape):
     start_coords = []
     for i in range(3):
@@ -79,6 +83,7 @@ def gen_start(neg_sample_flag, aneurysm_label, bound_size, crop_size, image_shap
             start_coords.append(np.random.randint(start_low, start_high))
         else:
             start_coords.append(int(aneurysm_label[i]) - int(crop_size[i] / 2) + np.random.randint(int(-bound_size / 2), int(bound_size / 2)))
+
     return start_coords, aneurysm_label
 
 
@@ -92,7 +97,7 @@ def gen_coords(start, image_shape, crop_size, stride = 4):
     
     linspaces = []
     for i in range(3):
-        linspace = np.linspace(norm_start[i], norm_start[i] + norm_size[i], crop_size[i] / stride)
+        linspace = np.linspace(norm_start[i], norm_start[i] + norm_size[i], int(crop_size[i]/stride) )
         linspaces.append(linspace)
 
     coord_z, coord_y, coord_x = np.meshgrid(linspaces[0], linspaces[1], linspaces[2], indexing = "ij")
@@ -129,6 +134,7 @@ def gen_crop(image, crop_size, start, pad_value, image_shape):
 
 
 def convert_neg2pos(crop_shape, aneurysm_label, patient_label, bound_size):
+    
     if np.isnan(aneurysm_label[0]):
         for box in patient_label:
             neg_box = np.array([crop_shape[1] / 2, crop_shape[2] / 2, crop_shape[3] / 2, min(crop_shape[1:4]) - bound_size])
@@ -173,6 +179,7 @@ def crop_patch(image, aneurysm_label, patient_label, neg_sample_flag, config):
     image_shape = image.shape[1:]
 
     start, aneurysm_label = gen_start(neg_sample_flag, aneurysm_label, bound_size, crop_size, image_shape)
+    # print("  Crop start", start, "|| aneurysm",   aneurysm_label)
 
     coord = gen_coords(start, image_shape, crop_size)
     crop = gen_crop(image, crop_size, start, pad_value, image_shape)
@@ -382,7 +389,7 @@ def pad_image(image, stride, pad_value):
     pad_h = int(np.ceil(float(raw_h) / stride)) * stride
     pad_w = int(np.ceil(float(raw_w) / stride)) * stride
 
-    pad = [[0, 0], [0, pad_z - raw_z], [0, pad_h - rah_w], [0, pad_w - raw_w]]
+    pad = [[0, 0], [0, pad_z - raw_z], [0, pad_h - raw_h], [0, pad_w - raw_w]]
 
     image_pad = np.pad(image, pad, "constant", constant_values = pad_value)
 
