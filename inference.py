@@ -3,10 +3,10 @@ import os
 import time
 import numpy as np
 import data
-from importlib import import_module
 import shutil
+from tqdm import tqdm
+from importlib import import_module
 from utils.log_utils import *
-import sys
 from utils.inference_utils import SplitComb, postprocess, plot_box 
 import torch
 from torch.nn import DataParallel
@@ -37,7 +37,7 @@ print(args)
 
 
 def main():
-    test_name = os.path.basename(args.input)
+    data_name = os.path.basename(args.input)
     data_dir = os.path.dirname(args.input)
     save_dir = os.path.dirname(args.output)
 
@@ -63,9 +63,9 @@ def main():
                              config['stride'],
                              config["margin"],
                              config['pad_value'])
-    dataset = data.TestDetector(
+    dataset = data.TestDataset(
         data_dir,
-        test_name,
+        data_name,
         config,
         split_comber=split_comber)
     test_loader = DataLoader(
@@ -84,44 +84,50 @@ def test(data_loader, net, get_pbb, save_dir, config):
 
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
-    print(save_dir)
 
     net.eval()
     split_comber = data_loader.dataset.split_comber
     for idx_data, (data, coord, nzhw) in enumerate(data_loader):
-        data_name = data_loader.dataset.filenames[idx_data].split('-')[0].split('/')[-1]
+        data_path = data_loader.dataset.filenames[idx_data]
+        data_name = os.path.basename(data_path)
+        data_dir  = os.path.dirname(data_path)
         print([idx_data,data_name])
-        
-        print(data[0].shape, coord[0].shape, nzhw[0].shape)
 
         data = data[0][0]
         coord = coord[0][0]
         nzhw = nzhw[0]
-        print(data.size())
 
         splitlist = range(0, len(data)+1, args.n_test)
         if splitlist[-1]!=len(data):
             splitlist.append(len(data))
-        outputlist = []
 
-        for i in range(len(splitlist)-1):
-            print('predict {}-th split'.format(i+1))
-            input_data = data[splitlist[i]:splitlist[i+1]].cuda()
-            input_coord = coord[splitlist[i]:splitlist[i+1]].cuda()
+        imagelist, coordlist, outputlist = [], [], []   
+        for i in tqdm(range(len(splitlist)-1), desc='Predicting splits'):
+            input_image = data[splitlist[i]:splitlist[i+1]]
+            input_coord = coord[splitlist[i]:splitlist[i+1]]
 
-            output = net(input_data,input_coord)
-            outputlist.append(output.data.cpu().numpy())
+            output = net(input_image.cuda(),input_coord.cuda())
             
+            imagelist.append(input_image.numpy())
+            coordlist.append(input_coord.numpy())
+            outputlist.append(output.data.cpu().numpy())
+
+        # np.savez(os.path.join(save_dir, data_name.split('.')[0]+'_net.npz'), 
+        #          images=imagelist, coords=coordlist, outputs=outputlist)
+
         output = np.concatenate(outputlist,0)
         output = split_comber.combine(output,nzhw=nzhw)
 
         pbb, mask = get_pbb(output, thresh=-3, ismask=True)
         pbb_nms = postprocess(pbb)
+
+        print('mask', mask)
         print('pbb_nms', pbb_nms)
 
-        np.save(os.path.join(save_dir, data_name+'_pbb.npy'), pbb_nms)
-        plot_box(data_name, pbb_nms)
-    
+        np.save(os.path.join(save_dir, data_name.split('.')[0]+'_pbb.npy'), pbb_nms)
+        np.savetxt(os.path.join(save_dir, data_name.split('.')[0]+'_pbb.txt'), pbb_nms, delimiter=',', fmt='%.1f')
+
+        plot_box(pbb_nms, data_dir, data_name, save_dir)
 
 if __name__ == '__main__':
     main()

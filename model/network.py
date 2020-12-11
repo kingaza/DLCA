@@ -26,7 +26,7 @@ config['aug_scale'] = False
 config['r_rand_crop'] = 0.3
 config['pad_value'] = 0
 config["margin"] = 16
-config["split_size"] = 144
+config["split_size"] = 80
 
 config['augtype'] = {'flip':True,'swap':False,'scale':False,'rotate':False}
 
@@ -64,10 +64,10 @@ class SPPblock(nn.Module):
 
     def forward(self, x):
         self.in_channels, h, w, z = x.size(1), x.size(2), x.size(3), x.size(4)
-        self.layer1 = F.upsample(self.conv(self.pool1(x)), size=(h, w, z), mode='trilinear')
-        self.layer2 = F.upsample(self.conv(self.pool2(x)), size=(h, w, z), mode='trilinear')
-        self.layer3 = F.upsample(self.conv(self.pool3(x)), size=(h, w, z), mode='trilinear')
-        self.layer4 = F.upsample(self.conv(self.pool4(x)), size=(h, w, z), mode='trilinear')
+        self.layer1 = F.interpolate(self.conv(self.pool1(x)), size=(h, w, z), mode='trilinear', align_corners=False)
+        self.layer2 = F.interpolate(self.conv(self.pool2(x)), size=(h, w, z), mode='trilinear', align_corners=False)
+        self.layer3 = F.interpolate(self.conv(self.pool3(x)), size=(h, w, z), mode='trilinear', align_corners=False)
+        self.layer4 = F.interpolate(self.conv(self.pool4(x)), size=(h, w, z), mode='trilinear', align_corners=False)
 
         out = torch.cat([self.layer1, self.layer2, self.layer3, self.layer4, x], 1)
         return out

@@ -8,7 +8,7 @@ import time
 import collections
 
 
-class TrainDetector(Dataset):
+class TrainDataset(Dataset):
     def __init__(self, data_dir, train_names, config):
 
         self.config = config
@@ -63,7 +63,7 @@ class TrainDetector(Dataset):
         return int(len(self.aneurysm_labels) / (1 - self.neg_ratio))
 
 
-class TestDetector(Dataset):
+class TestDataset(Dataset):
     def __init__(self, image_dir, test_name, config, split_comber=None):
 
         self.max_stride = config['max_stride']

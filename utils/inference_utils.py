@@ -1,4 +1,4 @@
-import torch
+import os
 import numpy as np
 import nibabel as nib
 import SimpleITK as sitk
@@ -125,7 +125,7 @@ def iou(box0, box1):
 
 
 def nms(output, nms_th, num_bbox):
-    y_max, x_max, z_max, y_min, x_min, z_min = 350, 380, 355, 123, 135, 16
+    # y_max, x_max, z_max, y_min, x_min, z_min = 350, 380, 355, 123, 135, 16
     if len(output) == 0:
         return output
     output = output[np.argsort(-output[:, 0])]
@@ -133,7 +133,8 @@ def nms(output, nms_th, num_bbox):
     for i in np.arange(1, len(output)):
         bbox = output[i]
         print('bbox', bbox)
-        if bbox[1] > y_max or bbox[1] < y_min or bbox[2] > x_max or bbox[2] < x_min or bbox[3] > z_max or bbox[3] < z_min:
+        if False: # bbox[1] > z_max or bbox[1] < z_min or bbox[2] > y_max or bbox[2] < y_min or bbox[3] > x_max or bbox[3] < x_min:
+            print('  --> skipped the bbox due to outside')
             continue
         else:
             flag = 1
@@ -169,11 +170,10 @@ def write(image3D_pix,filename):
     sitk.WriteImage(image3D,filename)
     
 
-def plot_box(image_name, boxes):
-    image_path = "./test_image/{}".format(image_name)
+def plot_box(boxes, data_dir, data_name, save_dir):
+    image_path = os.path.join(data_dir, data_name)
     image = read_nib(image_path)
     D,H,W = image.shape
-    print(image.shape)
     
     for box in boxes:
         _,y,x,z,d = box
@@ -190,5 +190,6 @@ def plot_box(image_name, boxes):
         image[z_min : z_max, y_min : y_max, x_min] = MAX_16_BIT
         image[z_min : z_max, y_min : y_max, x_max] = MAX_16_BIT  
         
-    write(image, "./prediction/{}.nii.gz".format(image_name))
+    write(image, os.path.join(save_dir, data_name))
+    print('Saved {} in shape'.format(data_name), image.shape)
     

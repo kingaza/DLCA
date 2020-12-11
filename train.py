@@ -88,7 +88,7 @@ def main():
     # cudnn.benchmark = True
     net = DataParallel(net)
 
-    dataset = data.TrainDetector(
+    dataset = data.TrainDataset(
         data_dir,
         train_name,
         config)
@@ -149,6 +149,11 @@ def train(data_loader, net, loss, epoch, optimizer, get_lr, save_freq, save_dir)
         coord = coord.cuda()
 
         output = net(data, coord)
+        np_output = output.data.cpu().numpy()
+        print('output maximal', np_output[...,0].max(), 
+              '@', np.unravel_index(np.argmax( np_output[...,0], axis=None),  
+                                    np_output[...,0].shape))
+
         loss_output = loss(output, target)
         optimizer.zero_grad()
         loss_output[0].backward()
