@@ -3,7 +3,7 @@ import nibabel as nib
 import os
 import random
 
-def oversample(config, patient_labels):
+def oversample(config, patient_labels, pos_aug=True):
     aneurysm_labels = []
     size_lowest = config["sizelim"] / config["reso"]
     size_middle = config["sizelim2"] / config["reso"]
@@ -15,12 +15,14 @@ def oversample(config, patient_labels):
                 size = box[3]
                 if size > size_lowest:
                     aneurysm_labels.append([np.concatenate([[i], box])])
-                if size >= size_highest:
-                    aneurysm_labels += [[np.concatenate([[i], box])]] * 2
-                if size >= size_middle and size < size_highest:
-                    aneurysm_labels += [[np.concatenate([[i], box])]] * 6
-                if size < size_middle:
-                    aneurysm_labels += [[np.concatenate([[i], box])]] * 4
+
+                if pos_aug:    
+                    if size >= size_highest:
+                        aneurysm_labels += [[np.concatenate([[i], box])]] * 2
+                    elif size >= size_middle:
+                        aneurysm_labels += [[np.concatenate([[i], box])]] * 6
+                    elif size > size_lowest:
+                        aneurysm_labels += [[np.concatenate([[i], box])]] * 4
     
     aneurysm_labels = np.concatenate(aneurysm_labels, axis=0)
     
@@ -40,7 +42,7 @@ def load_label(root, name_list):
     return patient_labels
     
 
-def load_image_choice(image_path, offset, scale):
+def load_image_choice(image_path, offset=0, scale=1):
     # w, h, z
     image = nib.load(image_path).get_fdata()
     np.subtract(image, offset, out = image)

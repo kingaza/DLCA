@@ -97,6 +97,12 @@ class Loss(nn.Module):
 
     def forward(self, output, labels, train = True):
         batch_size = labels.size(0)
+
+        data_shape = labels.shape
+
+        # print('output shape', output.shape)
+        # print('labels shape', labels.shape)
+
         output = output.view(-1, 5)
         labels = labels.view(-1, 5)
 
@@ -125,16 +131,27 @@ class Loss(nn.Module):
             regress_losses_data = [l.item() for l in regress_losses]
             classify_loss = 0.5 * self.classify_loss(pos_prob, pos_labels[:, 0]) + \
                             0.5 * self.classify_loss(neg_prob, neg_labels + 1)
-            pos_correct = (pos_prob.data >= 0.5).sum()
+            pos_true = (pos_prob.detach() >= 0.5).sum()
             pos_total = len(pos_prob)
 
             # print('Output', pos_output[:, 1:4].cpu().detach().numpy(), 'prob', pos_prob.cpu().detach().numpy())
             # print('label', pos_labels[:, 1:4].cpu().numpy())
 
+            # idcs = pos_idcs.detach().cpu().numpy()[:,0]
+            # idcs = np.arange(len(idcs))[idcs]
+            # print('positive index', idcs)
+            # print([np.unravel_index(i, data_shape[:-1]) for i in idcs])
+
+            # print('Positive prob.', pos_prob.detach().cpu().numpy())
+            # false_pos_labels = pos_labels[pos_prob.detach()<0.5, 1:4].detach().cpu().numpy()
+            # false_pos_output = pos_output[pos_prob.detach()<0.5, 1:4].detach().cpu().numpy()
+            # print('false Positive of labels position', len(false_pos_labels), false_pos_labels)        
+            # print('false Positive of output position', len(false_pos_output), false_pos_output)           
+
         else:
             regress_losses = [0,0,0,0]
             classify_loss =  0.5 * self.classify_loss(neg_prob, neg_labels + 1)
-            pos_correct = 0
+            pos_true = 0
             pos_total = 0
             regress_losses_data = [0,0,0,0]
         classify_loss_data = classify_loss.item()
@@ -143,10 +160,18 @@ class Loss(nn.Module):
         for regress_loss in regress_losses:
             loss += regress_loss
 
-        neg_correct = (neg_prob.data < 0.5).sum()
+        neg_true = (neg_prob.detach() < 0.5).sum()
         neg_total = len(neg_prob)
 
-        return [loss, classify_loss_data] + regress_losses_data + [pos_correct, pos_total, neg_correct, neg_total]
+        # np.set_printoptions(precision=2, suppress=True)
+        # print('positive labels', pos_labels.detach().cpu().numpy())
+        # print('positive output', pos_output.detach().cpu().numpy())
+        # print('negative labels', neg_labels.detach().cpu().numpy())  
+        # print('negative output', neg_output.detach().cpu().numpy())     
+        # print('positive:', 0 if len(pos_output)==0 else pos_true.detach().cpu().numpy(), '/', pos_total)        
+        # print('negative:', 0 if len(neg_output)==0 else neg_true.detach().cpu().numpy(), '/', neg_total)    
+
+        return [loss, classify_loss_data] + regress_losses_data + [pos_true, pos_total, neg_true, neg_total]
 
 
 class GetPBB(object):

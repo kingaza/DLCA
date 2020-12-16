@@ -13,12 +13,12 @@ class TrainDataset(Dataset):
 
         self.config = config
         # 0.3
-        self.neg_ratio = config['r_rand_crop']
+        self.neg_ratio = config['neg_ratio']
         self.pad_value = config["pad_value"]
         self.idxs = train_names
 
         self.patient_labels = load_label(data_dir, self.idxs)
-        self.aneurysm_labels = oversample(config, self.patient_labels)
+        self.aneurysm_labels = oversample(config, self.patient_labels, pos_aug=False)
         self.filenames = [os.path.join(data_dir, "{}.nii.gz".format(idx)) for idx in self.idxs]
     
     
@@ -34,7 +34,6 @@ class TrainDataset(Dataset):
 
         aneurysm_label = self.aneurysm_labels[idx]
         patient_idx = int(aneurysm_label[0])
-        size = aneurysm_label[4]
 
         image_path = self.filenames[patient_idx]
         offset = 0.0
@@ -57,7 +56,7 @@ class TrainDataset(Dataset):
         label = map_label(self.config, aneurysm_label, patient_label)
         sample = sample.astype(np.float32)
 
-        return torch.from_numpy(sample), torch.from_numpy(label), coord
+        return torch.from_numpy(sample), torch.from_numpy(label), coord, image_path
 
     def __len__(self):
         return int(len(self.aneurysm_labels) / (1 - self.neg_ratio))
