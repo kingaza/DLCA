@@ -78,10 +78,10 @@ class Net(nn.Module):
         super(Net, self).__init__()
         self.preBlock = nn.Sequential(
             nn.Conv3d(1, 24, kernel_size = 3, padding = 1),
-            nn.BatchNorm3d(24),
+            nn.GroupNorm(3, 24),
             nn.ReLU(inplace = True),
             nn.Conv3d(24, 24, kernel_size = 3, padding = 1),
-            nn.BatchNorm3d(24),
+            nn.GroupNorm(3, 24),
             nn.ReLU(inplace = True))
             
         num_blocks_forw = [2,2,3,3]
@@ -120,11 +120,11 @@ class Net(nn.Module):
 
         self.path1 = nn.Sequential(
             nn.ConvTranspose3d(68, 64, kernel_size = 2, stride = 2),
-            nn.BatchNorm3d(64),
+            nn.GroupNorm(4, 64),
             nn.ReLU(inplace = True))
         self.path2 = nn.Sequential(
             nn.ConvTranspose3d(64, 64, kernel_size = 2, stride = 2),
-            nn.BatchNorm3d(64),
+            nn.GroupNorm(4, 64),
             nn.ReLU(inplace = True))
         self.drop = nn.Dropout3d(p = 0.5, inplace = False)
         self.output = nn.Sequential(nn.Conv3d(self.featureNum_back[0], 64, kernel_size = 1),

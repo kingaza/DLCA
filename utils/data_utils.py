@@ -143,9 +143,9 @@ def convert_neg2pos(crop_shape, aneurysm_label, patient_label, bound_size):
             crop_iou = gen_iou(neg_box, box)
 
             if crop_iou > 0.2:
-                print("this would be positive box")
+                # print("this would be positive box")
                 aneurysm_label = box
-                print("aneurysm label is:", aneurysm_label)
+                # print("aneurysm label is:", aneurysm_label)
     
     return aneurysm_label
 

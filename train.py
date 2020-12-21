@@ -76,7 +76,34 @@ def main():
         checkpoint = torch.load(args.resume)
         if start_epoch == 0:
             start_epoch = checkpoint['epoch'] + 1
-        net.load_state_dict(checkpoint['state_dict'])
+        
+        # net.load_state_dict(checkpoint['state_dict'])
+
+        ##########################################################################
+        # Note: replace BatchNorm by GroupNorm
+        # train with current dataset, and then do replacing with pre-trained model
+        ##########################################################################
+        # only update the keys in net
+        # why not work?!
+        net_dict = net.state_dict()
+        # print('-'*60)
+        # print('There are {} items in Net'.format(len(net_dict)))
+        # print(net_dict.keys())
+
+        # print('-'*60)
+        # print('There are {} items in checkpoint'.format(len(checkpoint['state_dict'])))
+        # print(checkpoint['state_dict'].keys())
+
+        update_dict = {k: v for k, v in checkpoint['state_dict'].items() if k in net_dict} 
+        # skipp_keys = [k for k in checkpoint['state_dict'].keys() if k not in net_dict.keys()]
+
+        # print('-'*60)
+        # print('updated {} items'.format(len(update_dict.keys())))
+        # print(skipp_keys)
+
+        net_dict.update(update_dict)
+        net.load_state_dict(net_dict)
+
     else:
         if start_epoch == 0:
             start_epoch = 1
@@ -125,9 +152,9 @@ def main():
         tnr_l.append(tnr)
 
         # update at every epoch
-        plot(os.path.join(save_dir + 'train_curves.png'), 
+        plot(os.path.join(save_dir, 'train_curves.png'), 
                           loss_total_l, loss_class_l, loss_regress_l, tpr_l, tnr_l)
-        np.savez(os.path.join(save_dir + 'train_curves.npz'),
+        np.savez(os.path.join(save_dir, 'train_curves.npz'),
                  loss_total=np.array(loss_total_l),
                  loss_class=np.array(loss_class_l),
                  loss_regress=np.array(loss_regress_l),
@@ -136,15 +163,15 @@ def main():
 
         if len(train_hist)>0:         
             df_train = pd.DataFrame(train_hist)
-            df_train.to_csv(os.path.join(save_dir + 'train_info.csv'))
+            df_train.to_csv(os.path.join(save_dir, 'train_info.csv'))
 
 
 def get_lr(epoch):
-    if epoch <= 80:    # epochs * 0.8:
+    if epoch <= 200:    # epochs * 0.8:
         lr = args.lr
-    elif epoch <= 150:  # epochs * 0.9:
+    elif epoch <= 300:  # epochs * 0.9:
         lr = 0.1 * args.lr
-    elif epoch <= 250:
+    elif epoch <= 400:
         lr = 0.01 * args.lr
     else:
         lr = 0.001 * args.lr        
@@ -163,8 +190,8 @@ def train_epoch(data_loader, net, loss, optimizer, epoch):
     results = []
 
     print('='*60)    
-    desc_title = 'Epoch #{} with lr={:.3e}'.format(epoch, lr)
-    for data, target, coord, image_path in tqdm(data_loader, desc=desc_title):
+    print('Epoch #{} for {} exmaples with lr={:.3e}'.format(epoch, len(data_loader), lr))
+    for data, target, coord, image_path in tqdm(data_loader):
 
         data = data.cuda()
         target = target.cuda()
@@ -193,6 +220,8 @@ def train_epoch(data_loader, net, loss, optimizer, epoch):
         batch_result['neg_true'] = 0 if loss_output[9]==0 else int(loss_output[8].detach().cpu().numpy())
         batch_result['neg_false']   = loss_output[9] - batch_result['neg_true']
         batch_result['neg_total']   = loss_output[9]
+
+        batch_result['loss_bce'] = loss_output[1]
         batch_result['delta_z'] = loss_output[2]
         batch_result['delta_h'] = loss_output[3]
         batch_result['delta_w'] = loss_output[4]
@@ -259,7 +288,7 @@ def train_epoch(data_loader, net, loss, optimizer, epoch):
 
     df_results = pd.DataFrame(results)
     df_class = df_results[['pos_true', 'pos_false', 'pos_total', 'neg_true', 'neg_false', 'neg_total']]
-    df_regre = df_results[['delta_z','delta_h','delta_w','delta_d']]
+    df_regre = df_results[['loss_bce', 'delta_z','delta_h','delta_w','delta_d']]
     print('-'*30)
     print(df_class.sum())
     print('-'*20)

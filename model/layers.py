@@ -44,10 +44,10 @@ class PostRes(nn.Module):
     def __init__(self, n_in, n_out, stride = 1):
         super(PostRes, self).__init__()
         self.conv1 = nn.Conv3d(n_in, n_out, kernel_size = 3, stride = stride, padding = 1)
-        self.bn1 = nn.BatchNorm3d(n_out)
+        self.bn1 = nn.GroupNorm(n_out//16, n_out)
         self.relu = nn.ReLU(inplace = True)
         self.conv2 = nn.Conv3d(n_out, n_out, kernel_size = 3, padding = 1)
-        self.bn2 = nn.BatchNorm3d(n_out)
+        self.bn2 = nn.GroupNorm(n_out//16, n_out)
 
         self.ca = ChannelAttention(n_out)
         self.sa = SpatialAttention()
@@ -55,7 +55,7 @@ class PostRes(nn.Module):
         if stride != 1 or n_out != n_in:
             self.shortcut = nn.Sequential(
                 nn.Conv3d(n_in, n_out, kernel_size = 1, stride = stride),
-                nn.BatchNorm3d(n_out))
+                nn.GroupNorm(n_out//16, n_out))
         else:
             self.shortcut = None
 
@@ -98,13 +98,13 @@ class Loss(nn.Module):
     def forward(self, output, labels, train = True):
         batch_size = labels.size(0)
 
-        data_shape = labels.shape
-
         # print('output shape', output.shape)
         # print('labels shape', labels.shape)
 
         output = output.view(-1, 5)
         labels = labels.view(-1, 5)
+
+        threshold = np.abs(np.clip(np.random.normal(0, 0.2, 1), -0.5, 0.5)[0])
 
         pos_idcs = labels[:, 0] > 0.5
         pos_idcs = pos_idcs.unsqueeze(1).expand(pos_idcs.size(0), 5)
@@ -137,6 +137,7 @@ class Loss(nn.Module):
             # print('Output', pos_output[:, 1:4].cpu().detach().numpy(), 'prob', pos_prob.cpu().detach().numpy())
             # print('label', pos_labels[:, 1:4].cpu().numpy())
 
+            # data_shape = labels.shape
             # idcs = pos_idcs.detach().cpu().numpy()[:,0]
             # idcs = np.arange(len(idcs))[idcs]
             # print('positive index', idcs)
@@ -172,6 +173,14 @@ class Loss(nn.Module):
         # print('negative:', 0 if len(neg_output)==0 else neg_true.detach().cpu().numpy(), '/', neg_total)    
 
         return [loss, classify_loss_data] + regress_losses_data + [pos_true, pos_total, neg_true, neg_total]
+
+
+class FocalLoss(nn.Module):
+    def __init__(self, alpha, gamma):
+        super(FocalLoss, self).__init__()
+
+    def forward(self):
+        pass
 
 
 class GetPBB(object):
