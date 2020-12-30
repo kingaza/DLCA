@@ -1,30 +1,33 @@
-import torch
-import numpy as np
+
 import os
-from torch.utils.data import Dataset
-import nibabel as nib
-from utils.data_utils import *
 import time
 import collections
+import numpy as np
+
+import torch
+from torch.utils.data import Dataset
+
+from utils.data_utils import load_image, load_label, map_label
+from utils.data_utils import oversample, augment_image_label, crop_patch, flip
 
 
 class TrainDataset(Dataset):
-    def __init__(self, data_dir, train_names, config):
+    def __init__(self, data_dir, data_names, config, aug_factor):
 
         self.config = config
+        self.aug_factor = aug_factor
         # 0.3
         self.neg_ratio = config['neg_ratio']
         self.pad_value = config["pad_value"]
-        self.idxs = train_names
+        self.data_names = data_names
 
-        self.patient_labels = load_label(data_dir, self.idxs)
+        self.patient_labels = load_label(data_dir, self.data_names)
         self.aneurysm_labels = oversample(config, self.patient_labels, pos_aug=False)
-        self.filenames = [os.path.join(data_dir, "{}.nii.gz".format(idx)) for idx in self.idxs]
+        self.filenames = [os.path.join(data_dir, "{}.nii.gz".format(idx)) for idx in self.data_names]
     
     
     def __getitem__(self, idx):
-        t = time.time()
-        np.random.seed(int(str(t % 1)[2:7]))
+        np.random.seed(int(str(time.time() % 1)[2:7]))
 
         if idx >= len(self.aneurysm_labels):
             neg_sample_flag = True
@@ -32,26 +35,30 @@ class TrainDataset(Dataset):
         else:
             neg_sample_flag = False
 
-        aneurysm_label = self.aneurysm_labels[idx]
-        patient_idx = int(aneurysm_label[0])
+        aneurysm = self.aneurysm_labels[idx]
+        patient_idx = int(aneurysm[0])
+        patient = self.patient_labels[patient_idx]
+        aneurysm = aneurysm[1:]
 
         image_path = self.filenames[patient_idx]
         offset = 0.0
         scale = 100.0
         image = load_image(image_path, offset, scale)
-        patient_label = self.patient_labels[patient_idx]
         
-        crop_dict = crop_patch(image, aneurysm_label[1:], patient_label, neg_sample_flag, self.config)
-        # label mapping
+        # rotate image and labels as well
+        image_aug, aneurysm_aug, patient_aug = augment_image_label(image, aneurysm, patient, self.aug_factor)   
+        # image_aug, aneurysm_aug, patient_aug = image, aneurysm, patient
+        
+        # crop sample
+        crop_dict = crop_patch(image_aug, aneurysm_aug, patient_aug, neg_sample_flag, self.config)
         sample = crop_dict["image_patch"]
+        coord  = crop_dict["coord"]
+        aneurysm_label = crop_dict["aneurysm_label"]
+        patient_label  = crop_dict["patient_label"]
         # print('  label ->', aneurysm_label[1:4], ', size =', aneurysm_label[4])
         
-        coord = crop_dict["coord"]
-        aneurysm_label = crop_dict["aneurysm_label"]
-        patient_label = crop_dict["patient_label"]
-
-        # augment
-        sample, aneurysm_label, patient_label, coord = augment(sample, aneurysm_label, patient_label, coord)
+        # further flip augmentation
+        sample, aneurysm_label, patient_label, coord = flip(sample, aneurysm_label, patient_label, coord)
     
         label = map_label(self.config, aneurysm_label, patient_label)
         sample = sample.astype(np.float32)
@@ -62,6 +69,7 @@ class TrainDataset(Dataset):
         return int(len(self.aneurysm_labels) / (1 - self.neg_ratio))
 
 
+
 class TestDataset(Dataset):
     def __init__(self, image_dir, test_name, config, split_comber=None):
 
@@ -69,8 +77,8 @@ class TestDataset(Dataset):
         self.stride = config['stride']
         self.pad_value = config['pad_value']
         self.split_comber = split_comber
-        self.idxs = [test_name]
-        self.filenames = [os.path.join(image_dir, '{}.nii.gz'.format(idx)) for idx in self.idxs]
+        self.data_names = [test_name]
+        self.filenames = [os.path.join(image_dir, '{}.nii.gz'.format(idx)) for idx in self.data_names]
 
     def __getitem__(self, idx, split=None):
         # t = time.time()
@@ -107,7 +115,7 @@ class TestDataset(Dataset):
 
     def __len__(self):
         
-        return len(self.idxs)
+        return len(self.data_names)
 
 
 def collate(batch):

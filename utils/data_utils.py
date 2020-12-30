@@ -1,7 +1,11 @@
-import numpy as np 
-import nibabel as nib
+
+
 import os
 import random
+import numpy as np 
+from scipy.ndimage import rotate, zoom
+import nibabel as nib
+
 
 def oversample(config, patient_labels, pos_aug=True):
     aneurysm_labels = []
@@ -63,6 +67,46 @@ def load_image(image_path, offset, scale):
     image = np.expand_dims(image, axis=0)
     
     return image
+
+
+def augment_image_label(image, aneurysm_label, patient_label, aug_factor):
+
+    # do nothitng
+    if aug_factor < 0.01:
+        return image, aneurysm_label, patient_label
+
+    assert len(image.shape)==4          # C-Z-H-W
+    assert len(aneurysm_label)==4       # Z,H,W,D
+    assert len(patient_label)==4        # Z,H,W,D
+
+    new_image = image.copy()
+    new_patient_label = patient_label.copy()
+    new_aneurysm_label = aneurysm_label.copy()
+
+    # Rotate: only along Z-axis due to time-consuming
+    angle = np.random.uniform(-1,1) * aug_factor
+    rotmat = np.array([[np.cos(angle/180*np.pi), -np.sin(angle/180*np.pi)],
+                    [np.sin(angle/180*np.pi), np.cos(angle/180*np.pi)]])
+    size = np.array(image.shape[2:4]).astype('float')
+
+    new_image = rotate(new_image, angle, axes=(2,3), reshape=False)
+    for bbox in new_patient_label:
+        bbox[1:3] = np.dot(rotmat, bbox[1:3]-size/2) + size/2
+    new_aneurysm_label[1:3] = np.dot(rotmat, new_aneurysm_label[1:3]-size/2) + size/2      
+
+    # ZOOM: time-consuming too much!
+    # zoom_factor = np.random.uniform(0.9, 1.1)
+    # new_image = zoom(new_image, zoom_factor)
+    # new_patient_label = new_patient_label * zoom_factor
+    # new_aneurysm_label = new_aneurysm_label * zoom_factor    
+
+    # Scale
+    offset = np.random.uniform(-0.2, 0.2)
+    scale = np.random.uniform(0.9, 1.1)
+    np.subtract(new_image, offset, out = new_image)
+    np.divide(new_image, scale, out = new_image)
+
+    return new_image, new_aneurysm_label, new_patient_label   
     
 
 # if no enough room for bound, reduce to bound_size/2
@@ -373,7 +417,7 @@ def map_label(config, aneurysm_label, patient_label):
     return label
 
     
-def augment(sample, aneurysm_label, patient_label, coord):
+def flip(sample, aneurysm_label, patient_label, coord):
     flipid = np.array([1, np.random.randint(2), np.random.randint(2)]) * 2 - 1
     sample = np.ascontiguousarray(sample[:, ::flipid[0], ::flipid[1], ::flipid[2]])
     coord = np.ascontiguousarray(coord[:, ::flipid[0], ::flipid[1], ::flipid[2]])

@@ -1,86 +1,49 @@
 import argparse
 import os
 import time
-import numpy as np
-import data
-import shutil
-from tqdm import tqdm
 from importlib import import_module
-from utils.log_utils import *
-from utils.inference_utils import SplitComb, postprocess, plot_box 
+import numpy as np
+from tqdm import tqdm
+
 import torch
 from torch.nn import DataParallel
 from torch.backends import cudnn
 from torch.utils.data import DataLoader
 
-
-parser = argparse.ArgumentParser(description='ca detection')
-parser.add_argument('--model', '-m', metavar='MODEL', default='model.network',
-                    help='model')
-parser.add_argument('-j', '--workers', default=0, type=int, metavar='N',
-                    help='number of data loading workers (default: 32)')
-parser.add_argument('-b', '--batch-size', default=1, type=int,
-                    metavar='N', help='mini-batch size (default: 16)')
-parser.add_argument('--checkpoint', default='', type=str, metavar='PATH',
-                    help='path to latest checkpoint (default: none)')
-parser.add_argument('--input', default='', type=str, metavar='data',
-                    help='directory to save images (default: none)')
-parser.add_argument('--output', default='', type=str, metavar='SAVE',
-                    help='directory to save prediction results(default: none)')
-parser.add_argument('--test', default=1, type=int, metavar='TEST',
-                    help='1 do test evaluation, 0 not')
-parser.add_argument('--n_test', default=1, type=int, metavar='N',
-                    help='number of gpu for test')
-
-args = parser.parse_args()
-print(args)
+from data import TestDataset, collate
+from utils.log_utils import *
+from utils.inference_utils import SplitComb, postprocess, plot_box 
 
 
-def main():
-    data_name = os.path.basename(args.input)
-    data_dir = os.path.dirname(args.input)
-    save_dir = os.path.dirname(args.output)
+def get_args():
 
-    if not os.path.exists(save_dir):
-        os.makedirs(save_dir)
-    logfile = os.path.join(save_dir, 'log')
+    parser = argparse.ArgumentParser(description='ca detection')
+    parser.add_argument('--model', '-m', metavar='MODEL', default='model.network',
+                        help='model')
+    parser.add_argument('-j', '--workers', default=0, type=int, metavar='N',
+                        help='number of data loading workers (default: 32)')
+    parser.add_argument('-b', '--batch-size', default=1, type=int,
+                        metavar='N', help='mini-batch size (default: 16)')
+    parser.add_argument('--checkpoint', default='', type=str, metavar='PATH',
+                        help='path to latest checkpoint (default: none)')
+    parser.add_argument('--input', default='', type=str, metavar='data',
+                        help='directory to save images (default: none)')
+    parser.add_argument('--output', default='', type=str, metavar='SAVE',
+                        help='directory to save prediction results(default: none)')
+    parser.add_argument('--test', default=1, type=int, metavar='TEST',
+                        help='1 do test evaluation, 0 not')
+    parser.add_argument('--n_test', default=1, type=int, metavar='N',
+                        help='number of gpu for test')
 
-    torch.manual_seed(0)
-    model = import_module(args.model)
-    config, net, loss, get_pbb = model.get_model()
+    args = parser.parse_args()
 
-    if args.checkpoint:
-        checkpoint = torch.load(args.checkpoint)
-        net.load_state_dict(checkpoint['state_dict'])
-    
-    cudnn.benchmark = True
-    net = net.cuda()
-    net = DataParallel(net)
-    loss = loss.cuda()
+    return args
 
-    split_comber = SplitComb(config["split_size"],
-                             config['max_stride'],
-                             config['stride'],
-                             config["margin"],
-                             config['pad_value'])
-    dataset = data.TestDataset(
-        data_dir,
-        data_name,
-        config,
-        split_comber=split_comber)
-    test_loader = DataLoader(
-        dataset,
-        batch_size = 1,
-        shuffle = False,
-        num_workers = args.workers,
-        collate_fn = data.collate,
-        pin_memory=False)
-
-    test(test_loader, net, get_pbb, save_dir, config)
-    return
+args = get_args()
+print(args) 
 
 
-def test(data_loader, net, get_pbb, save_dir, config):
+def predict(data_loader, net, get_pbb, save_dir, config):
 
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
@@ -129,6 +92,49 @@ def test(data_loader, net, get_pbb, save_dir, config):
 
         plot_box(pbb_nms, data_dir, data_name, save_dir)
 
+
+
 if __name__ == '__main__':
-    main()
+
+    data_name = os.path.basename(args.input)
+    data_dir = os.path.dirname(args.input)
+    save_dir = os.path.dirname(args.output)
+
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+    logfile = os.path.join(save_dir, 'log')
+
+    torch.manual_seed(0)
+    model = import_module(args.model)
+    config, net, loss, get_pbb = model.get_model()
+
+    if args.checkpoint:
+        checkpoint = torch.load(args.checkpoint)
+        net.load_state_dict(checkpoint['state_dict'])
+    
+    cudnn.benchmark = True
+    net = net.cuda()
+    net = DataParallel(net)
+    loss = loss.cuda()
+
+    split_comber = SplitComb(config["split_size"],
+                             config['max_stride'],
+                             config['stride'],
+                             config["margin"],
+                             config['pad_value'])
+    dataset = TestDataset(
+        data_dir,
+        data_name,
+        config,
+        split_comber=split_comber)
+    test_loader = DataLoader(
+        dataset,
+        batch_size = 1,
+        shuffle = False,
+        num_workers = args.workers,
+        collate_fn = collate,
+        pin_memory=False)
+
+    predict(test_loader, net, get_pbb, save_dir, config)
+
     

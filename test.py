@@ -6,7 +6,7 @@ Created on Tue Nov 24 16:51:03 2020
 """
 
 import numpy as np
-from scipy.ndimage import rotate
+from scipy.ndimage import rotate, zoom
 
 from utils.data_utils import load_image, load_label
 from utils.data_utils import crop_patch, oversample
@@ -50,11 +50,16 @@ angle1 = np.random.uniform(-1,1) * 45
 angle1 = 90
 rotmat = np.array([[np.cos(angle1/180*np.pi), -np.sin(angle1/180*np.pi)],
                    [np.sin(angle1/180*np.pi), np.cos(angle1/180*np.pi)]])
-image[1:] = rotate(image[1:],angle1,axes=(2,3),reshape=False)
+
+assert len(image.shape)==4
+image = rotate(image,angle1,axes=(2,3),reshape=False)
 size = np.array(image.shape[2:4]).astype('float')
 for i, box in enumerate(patient_label):
+    assert box.size==4
     box[1:3] = np.dot(rotmat,box[1:3]-size/2)+size/2
     # patient_label[i] = box
+assert len(aneurysm_label)==5
+aneurysm_label[2:4] = np.dot(rotmat,aneurysm_label[2:4]-size/2)+size/2    
 print('-------- After Rotate --------')
 print('rotate {:.3f} degree in image'.format(angle1), image.shape[1:])
 print('aneurysm label', aneurysm_label[1:])

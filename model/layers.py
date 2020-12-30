@@ -41,13 +41,13 @@ class SpatialAttention(nn.Module):
 
 
 class PostRes(nn.Module):
-    def __init__(self, n_in, n_out, stride = 1):
+    def __init__(self, n_in, n_out, group_norm=True, stride = 1):
         super(PostRes, self).__init__()
         self.conv1 = nn.Conv3d(n_in, n_out, kernel_size = 3, stride = stride, padding = 1)
-        self.bn1 = nn.GroupNorm(n_out//16, n_out)
+        self.norm1 = nn.GroupNorm(n_out//16, n_out) if group_norm else nn.BatchNorm3d(n_out)
         self.relu = nn.ReLU(inplace = True)
         self.conv2 = nn.Conv3d(n_out, n_out, kernel_size = 3, padding = 1)
-        self.bn2 = nn.GroupNorm(n_out//16, n_out)
+        self.norm2 = nn.GroupNorm(n_out//16, n_out) if group_norm else nn.BatchNorm3d(n_out)
 
         self.ca = ChannelAttention(n_out)
         self.sa = SpatialAttention()
@@ -55,7 +55,7 @@ class PostRes(nn.Module):
         if stride != 1 or n_out != n_in:
             self.shortcut = nn.Sequential(
                 nn.Conv3d(n_in, n_out, kernel_size = 1, stride = stride),
-                nn.GroupNorm(n_out//16, n_out))
+                nn.GroupNorm(n_out//16, n_out) if group_norm else nn.BatchNorm3d(n_out))
         else:
             self.shortcut = None
 
@@ -65,10 +65,10 @@ class PostRes(nn.Module):
         if self.shortcut is not None:
             residual = self.shortcut(x)
         out = self.conv1(x)
-        out = self.bn1(out)
+        out = self.norm1(out)
         out = self.relu(out)
         out = self.conv2(out)
-        out = self.bn2(out)
+        out = self.norm2(out)
         # print("cacaca")
 
         out = self.ca(out) * out
@@ -85,22 +85,57 @@ def hard_mining(neg_output, neg_labels, num_hard):
     neg_labels = torch.index_select(neg_labels, 0, idcs)
     return neg_output, neg_labels
 
+class FocalLoss(nn.Module):
 
+    def __init__(self,
+                 alpha=0.25,
+                 gamma=2,
+                 reduction='mean',):
+        super(FocalLoss, self).__init__()
+        self.alpha = alpha
+        self.gamma = gamma
+        self.reduction = reduction
+        self.crit = nn.BCELoss(reduction='none')
+        #self.crit = nn.BCEWithLogitsLoss(reduction='none')
+
+    def forward(self, probs, label):
+        '''
+        logits and label have same shape, and label data type is long
+        args:
+            logits: tensor of shape (N, ...)
+            label: tensor of shape(N, ...)
+        '''
+        # compute loss
+        probs = probs.float() # use fp32 if logits is fp16
+        with torch.no_grad():
+            alpha = torch.empty_like(probs).fill_(1 - self.alpha)
+            alpha[label == 1] = self.alpha
+
+        pt = torch.where(label==1, probs, 1-probs)
+        ce_loss = self.crit(probs, label.float())
+        loss = (alpha * torch.pow(1-pt, self.gamma) * ce_loss)
+        if self.reduction == 'mean':
+            loss = loss.mean()
+        if self.reduction == 'sum':
+            loss = loss.sum()
+        return loss
+
+# Note: the names of pos_true, pos_false, neg_true, neg_false are not defined correctly
 class Loss(nn.Module):
-    def __init__(self, num_hard = 0):
+
+    def __init__(self, num_hard = 0, margin_range=[0.3, 0.7]):
         super(Loss, self).__init__()
         self.sigmoid = nn.Sigmoid()
-        self.classify_loss = nn.BCELoss()
+        self.classify_loss = FocalLoss() # nn.BCELoss()
         self.regress_loss = nn.SmoothL1Loss()
         self.num_hard = num_hard
-
+        self.margin_range = margin_range
 
     def forward(self, output, labels, train = True):
-        batch_size = labels.size(0)
-
         # print('output shape', output.shape)
         # print('labels shape', labels.shape)
 
+        batch_size = labels.size(0)
         output = output.view(-1, 5)
         labels = labels.view(-1, 5)
 
@@ -131,7 +166,10 @@ class Loss(nn.Module):
             regress_losses_data = [l.item() for l in regress_losses]
             classify_loss = 0.5 * self.classify_loss(pos_prob, pos_labels[:, 0]) + \
                             0.5 * self.classify_loss(neg_prob, neg_labels + 1)
-            pos_true = (pos_prob.detach() >= 0.5).sum()
+                            
+            pos_probs = pos_prob.detach().cpu().numpy()                
+            pos_true = (pos_probs >= 0.5).sum()
+            pos_margin = ((pos_probs>self.margin_range[0]) & (pos_probs<0.5)).sum()
             pos_total = len(pos_prob)
 
             # print('Output', pos_output[:, 1:4].cpu().detach().numpy(), 'prob', pos_prob.cpu().detach().numpy())
@@ -153,6 +191,7 @@ class Loss(nn.Module):
             regress_losses = [0,0,0,0]
             classify_loss =  0.5 * self.classify_loss(neg_prob, neg_labels + 1)
             pos_true = 0
+            pos_margin = 0
             pos_total = 0
             regress_losses_data = [0,0,0,0]
         classify_loss_data = classify_loss.item()
@@ -160,8 +199,10 @@ class Loss(nn.Module):
         loss = classify_loss
         for regress_loss in regress_losses:
             loss += regress_loss
-
-        neg_true = (neg_prob.detach() < 0.5).sum()
+        
+        neg_probs = neg_prob.detach().cpu().numpy()
+        neg_true = (neg_probs < 0.5).sum()
+        neg_margin = ((neg_probs>0.5) & (neg_probs<self.margin_range[1])).sum()
         neg_total = len(neg_prob)
 
         # np.set_printoptions(precision=2, suppress=True)
@@ -172,15 +213,9 @@ class Loss(nn.Module):
         # print('positive:', 0 if len(pos_output)==0 else pos_true.detach().cpu().numpy(), '/', pos_total)        
         # print('negative:', 0 if len(neg_output)==0 else neg_true.detach().cpu().numpy(), '/', neg_total)    
 
-        return [loss, classify_loss_data] + regress_losses_data + [pos_true, pos_total, neg_true, neg_total]
-
-
-class FocalLoss(nn.Module):
-    def __init__(self, alpha, gamma):
-        super(FocalLoss, self).__init__()
-
-    def forward(self):
-        pass
+        total_losses = [loss, classify_loss_data] + regress_losses_data + [pos_true, pos_total, neg_true, neg_total]
+        
+        return total_losses + [pos_margin, neg_margin]
 
 
 class GetPBB(object):

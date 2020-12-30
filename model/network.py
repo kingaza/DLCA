@@ -1,6 +1,6 @@
 import torch
 from torch import nn
-from model.layers import *
+from model.layers import PostRes, Loss, GetPBB
 import torch.nn.functional as F
 from functools import partial
 
@@ -12,11 +12,12 @@ config['chanel'] = 1
 config['crop_size'] = [128, 128, 128]
 config['stride'] = 4
 config['max_stride'] = 16
+config['group_norm'] = True # True: GroupNorm; False: BatchNorm3d
 config['num_neg'] = 800
 config['th_neg'] = 0.02
 config['th_pos_train'] = 0.5
 config['th_pos_val'] = 1
-config['num_hard'] = 2
+config['num_hard'] = 0
 config['bound_size'] = 12
 config['reso'] = 1
 config['sizelim'] = 0. 
@@ -28,7 +29,6 @@ config['pad_value'] = 0
 config["margin"] = 16
 config["split_size"] = 80
 
-config['augtype'] = {'flip':True,'swap':False,'scale':False,'rotate':False}
 
 class DACblock(nn.Module):
     def __init__(self, channel):
@@ -41,7 +41,6 @@ class DACblock(nn.Module):
             if isinstance(m, nn.Conv3d) or isinstance(m, nn.ConvTranspose3d):
                 if m.bias is not None:
                     m.bias.data.zero_()
-
 
     def forward(self, x):
         dilate1_out = nonlinearity(self.dilate1(x))
@@ -78,10 +77,10 @@ class Net(nn.Module):
         super(Net, self).__init__()
         self.preBlock = nn.Sequential(
             nn.Conv3d(1, 24, kernel_size = 3, padding = 1),
-            nn.GroupNorm(3, 24),
+            nn.GroupNorm(3, 24) if config['group_norm'] else nn.BatchNorm3d(24),
             nn.ReLU(inplace = True),
             nn.Conv3d(24, 24, kernel_size = 3, padding = 1),
-            nn.GroupNorm(3, 24),
+            nn.GroupNorm(3, 24) if config['group_norm'] else nn.BatchNorm3d(24),
             nn.ReLU(inplace = True))
             
         num_blocks_forw = [2,2,3,3]
@@ -92,9 +91,13 @@ class Net(nn.Module):
             blocks = []
             for j in range(num_blocks_forw[i]):
                 if j == 0:
-                    blocks.append(PostRes(self.featureNum_forw[i], self.featureNum_forw[i+1]))
+                    blocks.append(PostRes(self.featureNum_forw[i], 
+                                          self.featureNum_forw[i+1], 
+                                          group_norm=config['group_norm']))
                 else:
-                    blocks.append(PostRes(self.featureNum_forw[i+1], self.featureNum_forw[i+1]))
+                    blocks.append(PostRes(self.featureNum_forw[i+1], 
+                                          self.featureNum_forw[i+1], 
+                                          group_norm=config['group_norm']))
             setattr(self, 'forw' + str(i + 1), nn.Sequential(*blocks))
 
 
@@ -106,9 +109,13 @@ class Net(nn.Module):
                         addition = 3
                     else:
                         addition = 0
-                    blocks.append(PostRes(self.featureNum_back[i+1]+self.featureNum_forw[i+2]+addition, self.featureNum_back[i]))
+                    blocks.append(PostRes(self.featureNum_back[i+1]+self.featureNum_forw[i+2]+addition, 
+                                          self.featureNum_back[i], 
+                                          group_norm=config['group_norm']))
                 else:
-                    blocks.append(PostRes(self.featureNum_back[i], self.featureNum_back[i]))
+                    blocks.append(PostRes(self.featureNum_back[i], 
+                                          self.featureNum_back[i], 
+                                          group_norm=config['group_norm']))
             setattr(self, 'back' + str(i + 2), nn.Sequential(*blocks))
 
         self.maxpool1 = nn.MaxPool3d(kernel_size=2,stride=2,return_indices =True)
@@ -120,11 +127,11 @@ class Net(nn.Module):
 
         self.path1 = nn.Sequential(
             nn.ConvTranspose3d(68, 64, kernel_size = 2, stride = 2),
-            nn.GroupNorm(4, 64),
+            nn.GroupNorm(4, 64) if config['group_norm'] else nn.BatchNorm3d(64),
             nn.ReLU(inplace = True))
         self.path2 = nn.Sequential(
             nn.ConvTranspose3d(64, 64, kernel_size = 2, stride = 2),
-            nn.GroupNorm(4, 64),
+            nn.GroupNorm(4, 64) if config['group_norm'] else nn.BatchNorm3d(64),
             nn.ReLU(inplace = True))
         self.drop = nn.Dropout3d(p = 0.5, inplace = False)
         self.output = nn.Sequential(nn.Conv3d(self.featureNum_back[0], 64, kernel_size = 1),
@@ -156,12 +163,14 @@ class Net(nn.Module):
         rev3 = self.path1(center4)
         comb3 = self.back3(torch.cat((rev3, out3), 1))
         rev2 = self.path2(comb3)
-        comb2 = self.back2(torch.cat((rev2, out2,coord), 1))
+        feat = self.back2(torch.cat((rev2, out2,coord), 1))
+        comb2 = self.drop(feat)
 
         out = self.output(comb2)
         size = out.size()
         out = out.view(out.size(0), out.size(1), -1)
         out = out.transpose(1, 2).contiguous().view(size[0], size[2], size[3], size[4], len(config['anchors']), 5)
+        
         return out
 
 
