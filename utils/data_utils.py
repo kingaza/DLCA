@@ -38,11 +38,13 @@ def load_label(root, name_list):
 
     for idx in name_list:
         # z h w
-        l = np.load(os.path.join(root,"{}_bbox.npy".format(idx)))
-        if np.all(l == 0):
-            l = np.array([])
+        label_file = os.path.join(root,"{}_bbox.npy".format(idx))
+        if os.path.exists(label_file):
+            labels = np.load(label_file)
+            if np.all(labels == 0):
+                labels = np.array([])
+            patient_labels.append(labels)
 
-        patient_labels.append(l)
     return patient_labels
     
 
@@ -76,8 +78,9 @@ def augment_image_label(image, aneurysm_label, patient_label, aug_factor):
         return image, aneurysm_label, patient_label
 
     assert len(image.shape)==4          # C-Z-H-W
-    assert len(aneurysm_label)==4       # Z,H,W,D
-    assert len(patient_label)==4        # Z,H,W,D
+    if len(patient_label) > 0:
+        assert aneurysm_label.shape[-1]==4       # Z,H,W,D
+        assert patient_label.shape[-1]==4        # Z,H,W,D
 
     new_image = image.copy()
     new_patient_label = patient_label.copy()

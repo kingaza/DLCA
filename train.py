@@ -47,12 +47,14 @@ def get_args():
                         help='restore all items in the same state-dict from checkpoint')    
     parser.add_argument('--input', default='', type=str, metavar='SAVE',
                         help='directory to save train images (default: none)')
+    parser.add_argument("--aug-type", default='', type=str, metavar='SAVE',
+                        help='folders to list augmented datasets (default: none)')                          
     parser.add_argument('--train-dataset', default='', type=str, metavar='SAVE',
                         help='file to list train images (default: none)')   
     parser.add_argument('--valid-dataset', default='', type=str, metavar='SAVE',
                         help='file to list valid images (default: none)')      
-    parser.add_argument('--aug-limit', default=0, type=float,
-                        metavar='AF', help='augmentation limit')    
+    parser.add_argument('--rotate-limit', default=0, type=float,
+                        metavar='AF', help='Rotation limit along ax-Z')    
     parser.add_argument('--output', default='', type=str, metavar='SAVE',
                         help='directory to save checkpoint (default: none)')
 
@@ -81,16 +83,16 @@ def get_lr(epoch):
     return lr
 
 
-def train_epoch(config, net, loss, optimizer, epoch):
+def train_epoch(config, net, loss, optimizer, epoch, data_dir):
 
     net.train()
 
-    aug_factor = args.aug_limit * epoch / args.epochs
+    rotate_factor = args.rotate_limit * epoch / args.epochs
     dataset = TrainDataset(
         data_dir,
         train_images,
         config,
-        aug_factor)
+        rotate_factor)
     
     data_loader = DataLoader(
         dataset,
@@ -105,10 +107,9 @@ def train_epoch(config, net, loss, optimizer, epoch):
 
     metrics = []
     result_epoch = []
-
-    print('='*60)    
-    epoch_fmt = 'Epoch {}/{} training for {} exmaples with lr={:.3e} and aug_factor={:.1f}'
-    print(epoch_fmt.format(epoch, args.epochs, len(data_loader), lr, aug_factor))
+ 
+    epoch_fmt = 'Epoch {}/{} training for {} exmaples with lr={:.3e} and rotate_factor={:.1f}'
+    print(epoch_fmt.format(epoch, args.epochs, len(data_loader), lr, rotate_factor))
     for data, target, coord, image_path in tqdm(data_loader):
 
         data = data.cuda()
@@ -183,16 +184,16 @@ def train_epoch(config, net, loss, optimizer, epoch):
 
 
 
-def test_epoch(config, net, loss, epoch):
+def test_epoch(config, net, loss, epoch, data_dir):
 
     net.eval()
 
-    aug_factor = args.aug_limit * epoch / args.epochs
+    rotate_factor = args.rotate_limit * epoch / args.epochs
     dataset = TrainDataset(
         data_dir,
         valid_images,
         config,
-        aug_factor)
+        rotate_factor)
     
     data_loader = DataLoader(
         dataset,
@@ -228,7 +229,7 @@ def test_epoch(config, net, loss, epoch):
     print('Total Loss={:.6f}, True Positive={:d}/{:d}, True Negative={:d}/{:d}'.format(loss_total, 
                                                              pos_true, pos_total,
                                                              neg_true, neg_total))
-    print('margins: pos={}, neg={}'.format(pos_margin, neg_margin))
+    print('Hard Samples: pos={}, neg={}'.format(pos_margin, neg_margin))
     return (loss_total,loss_class,loss_regress,tpr,tnr)
 
 
@@ -257,8 +258,11 @@ if __name__ == '__main__':
                 name = name.split(".")[-3]
                 train_images.append(name)
     if args.valid_dataset:
-        valid_images = np.loadtxt(args.valid_dataset, dtype=str)                
+        valid_images = np.loadtxt(args.valid_dataset, dtype=str)        
 
+    aug_types = []
+    if args.aug_type:
+        aug_types = np.loadtxt(args.aug_type, dtype=str)           
 
     torch.manual_seed(0)
     model = import_module(args.model)
@@ -303,10 +307,17 @@ if __name__ == '__main__':
 
     loss_total_l, loss_class_l, loss_regress_l, tpr_l, tnr_l = [], [], [], [], []
 
+    aug_dir = data_dir
     train_hist = []
     for epoch in range(start_epoch, args.epochs+1):
 
-        train_metrics, train_results = train_epoch(config, net, loss, optimizer, epoch)
+        print('='*60)   
+        if args.aug_type:
+            aug_type = aug_types[np.random.choice(len(aug_types))]
+            aug_dir = data_dir + '_' + aug_type
+        print('Train and test dataset from', aug_dir)
+
+        train_metrics, train_results = train_epoch(config, net, loss, optimizer, epoch, data_dir=aug_dir)
         loss_total, loss_class, loss_regress, tpr, tnr = train_metrics
         train_hist += train_results
 
@@ -333,4 +344,4 @@ if __name__ == '__main__':
             
         if len(valid_images) > 0:
             with torch.no_grad():
-                test_metrics = test_epoch(config, net, loss, epoch)            
+                test_metrics = test_epoch(config, net, loss, epoch, data_dir=aug_dir)            

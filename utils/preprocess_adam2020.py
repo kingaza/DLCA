@@ -1,22 +1,21 @@
 
-
-
 import os 
 import argparse
-import numpy as np 
 import zipfile as zf
-import SimpleITK as sitk
-import nibabel as nib
-from scipy.ndimage.interpolation import zoom
+
+import numpy as np 
 from scipy.ndimage.measurements import center_of_mass, label, find_objects
+from scipy.ndimage import rotate, zoom, grey_closing
 from skimage import io, measure
 
-
+import SimpleITK as sitk
+import nibabel as nib
 
 
 # x y z -> z, y, z
 def read_image(path):
-    image = nib.load(path).get_fdata()
+    # Note: scale image intensity
+    image = nib.load(path).get_fdata() / 100.0
     spacing = sitk.ReadImage(path).GetSpacing()
     return image.transpose(2, 1, 0), spacing[::-1]
 
@@ -30,9 +29,11 @@ def rescale(image, label, input_space, output_space = (0.39, 0.39, 0.39)):
     assert image.shape == label.shape, "image shape:{} != label shape{}".format(image.shape, label.shape)
     zoom_factor = tuple([input_space[i] / output_space[i] for i in range(3)])
     # image cubic interpolation
-    image_rescale = zoom(image, zoom_factor, order = 3)
+    image_rescale = zoom(image, zoom_factor, order=3)
     # label nearest interpolation
-    label_rescale = zoom(label, zoom_factor, order = 0)
+    label_rescale = zoom(label, zoom_factor, order=0)
+    label_rescale = grey_closing(label_rescale, size=(5,5,5))
+
     return image_rescale, label_rescale
 
 
@@ -86,6 +87,25 @@ def crop(image, label, shape=(512, 512, 512)):
         label[coord_s[0]:coord_s[1], coord_s[2]:coord_s[3], coord_s[4]:coord_s[5]]
 
     return image_crop, label_crop
+
+
+
+def rotate_center(image, label, angle=15, ax=0):
+
+    assert image.shape == label.shape
+
+    if angle < 1:
+        return image, label
+
+    axes = tuple({0,1,2}.difference({ax}))
+    # image cubic interpolation
+    img = rotate(image, angle, axes=axes, reshape=False, order=3)
+    # label nearest interpolation
+    lbl = rotate(label, angle, axes=axes, reshape=False, order=0)
+    lbl = grey_closing(lbl, size=(5,5,5))
+
+    return img, lbl
+  
 
 
 def write_image(image, path):
@@ -144,7 +164,7 @@ def save_result(image, label, image_name, save_root):
     np.savetxt(os.path.join(save_root, "{}_bbox.txt".format(image_name)), boxes, delimiter=',', fmt='%d')
 
 
-def preprocess(in_dir, data_file, out_dir):
+def preprocess(rotate_type, zoom_type, in_dir, data_file, out_dir):
 
     if data_file.split('.')[-1] != 'zip':
         return
@@ -168,12 +188,22 @@ def preprocess(in_dir, data_file, out_dir):
     image, spacing = read_image(tof_path)
     label = read_label(label_path)
 
-    image_rescale, label_rescale = rescale(image, label, input_space=spacing, output_space = (0.39, 0.39, 0.39))
+    output_spacing = (0.39, 0.39, 0.39)
+    if zoom_type == 1:
+        output_spacing = tuple(np.asarray(output_spacing) * 1.11)
+    elif zoom_type == 2:
+        output_spacing = tuple(np.asarray(output_spacing) * 0.9)
+    image_rescale, label_rescale = rescale(image, label, input_space=spacing, output_space=output_spacing)
 
-    image_crop, label_crop = crop(image_rescale, label_rescale, shape=None)
+    ax = (rotate_type+1) // 2
+    angle = ((rotate_type+1) % 2 * 2 - 1) * 15
+    image_rotate, label_rotate = rotate_center(image_rescale, label_rescale, angle=angle, ax=ax)
+
+    image_crop, label_crop = crop(image_rotate, label_rotate, shape=None)
     
+    np.set_printoptions(formatter={'float': '{: 0.3f}'.format})
     print(data_file, spacing)
-    print(image.shape, '->', image_rescale.shape, '->', label_crop.shape)
+    print(image.shape, '->', image_rescale.shape, '->', image_rotate.shape, '->', image_crop.shape)
 
     # save
     save_result(image_crop, label_crop, data_name, out_dir)
@@ -186,14 +216,23 @@ if __name__ == "__main__":
                         help='directory to ADAM 2020 data (default: none)')
     parser.add_argument('--output', default='', type=str, metavar='SAVE',
                         help='directory to save nii.gz data (default: none)')
+    parser.add_argument('--rotate-type', default='0', type=int, metavar='S',
+                        help='0:None, 1:ax1/15, 2: ax1/-15, 3:ax2/15, 4:ax2/-15')
+    parser.add_argument('--zoom-type', default='0', type=int, metavar='S',
+                        help='0:None, 1:ZoomOut/10%, 2:ZoomIn/10%')                                                
     
     global args
     args = parser.parse_args()
 
-    if os.path.exists(args.output) == False:
-        os.makedirs(args.output)
+    rotate_type = args.rotate_type
+    zoom_type = args.zoom_type
+    input_dir = args.input
+    output_dir = args.output + '_{}{}'.format(rotate_type, zoom_type)
 
-    data_list = os.listdir(args.input)
+    if os.path.exists(output_dir) == False:
+        os.makedirs(output_dir)
+
+    data_list = os.listdir(input_dir)
 
     for data_file in data_list:
-        preprocess(args.input, data_file, args.output)
+        preprocess(rotate_type, zoom_type, input_dir, data_file, output_dir)
