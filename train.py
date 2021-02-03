@@ -20,7 +20,7 @@ from utils.log_utils import Logger, plot
 
 def get_args():
 
-    parser = argparse.ArgumentParser(description='ca detection')
+    parser = argparse.ArgumentParser(description='Cerebral Aneurysms Detection')
     parser.add_argument('--model', '-m', metavar='MODEL', default='model.network',
                         help='model')
     parser.add_argument('-j', '--workers', default=32, type=int, metavar='N',
@@ -112,6 +112,9 @@ def train_epoch(config, net, loss, optimizer, epoch, data_dir):
     print(epoch_fmt.format(epoch, args.epochs, len(data_loader), lr, rotate_factor))
     for data, target, coord, image_path in tqdm(data_loader):
 
+        # print(np.where(target[...,0]>0.5))
+        pos_in_image = np.where(target[...,0]>0.5)[0]
+
         data = data.cuda()
         target = target.cuda()
         coord = coord.cuda()
@@ -124,28 +127,36 @@ def train_epoch(config, net, loss, optimizer, epoch, data_dir):
         optimizer.step()
 
         loss_output[0] = loss_output[0].item()
-        metrics.append(loss_output)
+        metrics.append(loss_output[:10])
 
         coord_start = coord[:,:,0,0,0].detach().cpu().numpy()
         coord_end = coord[:,:,-1,-1,-1].detach().cpu().numpy()
         # print('coord: start =', coord_start, ', end =', coord_end) 
 
         result_batch = {'epoch':epoch,}
-        for i_image in range(len(image_path)):
-            result_batch['image_{}'.format(i_image)] = image_path[i_image]  
-            result_batch['coord_{}'.format(i_image)] = (list(coord_start)[i_image], list(coord_end)[i_image])
+        result_batch['loss'] = loss_output[0]
+        result_batch['loss_ce'] = loss_output[1]
+        result_batch['delta_z'] = loss_output[2]
+        result_batch['delta_h'] = loss_output[3]
+        result_batch['delta_w'] = loss_output[4]
+        result_batch['delta_d'] = loss_output[5]
+
         result_batch['pos_true'] = 0 if loss_output[7]==0 else int(loss_output[6])
         result_batch['pos_false']   = loss_output[7] - result_batch['pos_true']
         result_batch['pos_total']   = loss_output[7]
         result_batch['neg_true'] = 0 if loss_output[9]==0 else int(loss_output[8])
         result_batch['neg_false']   = loss_output[9] - result_batch['neg_true']
         result_batch['neg_total']   = loss_output[9]
+        result_batch['num_total']   = loss_output[10]
+        result_batch['pos_margin']   = loss_output[11]
+        result_batch['neg_margin']   = loss_output[12]
 
-        result_batch['loss_ce'] = loss_output[1]
-        result_batch['delta_z'] = loss_output[2]
-        result_batch['delta_h'] = loss_output[3]
-        result_batch['delta_w'] = loss_output[4]
-        result_batch['delta_d'] = loss_output[5]
+        for i_image in range(len(image_path)):
+            result_batch['image_{}'.format(i_image)] = image_path[i_image]  
+            result_batch['coord_{}'.format(i_image)] = (list(coord_start)[i_image], list(coord_end)[i_image])
+
+        for i, i_pos in enumerate(pos_in_image):    
+            result_batch['pred_{}'.format(i_pos)]   = loss_output[13+i]
 
         result_epoch.append(result_batch)  
 
@@ -162,17 +173,17 @@ def train_epoch(config, net, loss, optimizer, epoch, data_dir):
             os.path.join(args.output, '%03d.ckpt' % epoch))
 
     metrics = np.asarray(metrics, np.float32)
-    tpr = 100.0 * np.sum(metrics[:,6]) / np.sum(metrics[:,7])
-    tnr = 100.0 * np.sum(metrics[:,8]) / np.sum(metrics[:,9])
     loss_total = np.mean(metrics[:,0])
     loss_class = np.mean(metrics[:,1])
     loss_regress = [np.mean(metrics[:,2]),
                     np.mean(metrics[:,3]),
                     np.mean(metrics[:,4]),
                     np.mean(metrics[:,5])]
+    tpr = 100.0 * np.sum(metrics[:,6]) / np.sum(metrics[:,7])
+    tnr = 100.0 * np.sum(metrics[:,8]) / np.sum(metrics[:,9])
 
     df_results = pd.DataFrame(result_epoch)
-    df_class = df_results[['pos_true', 'pos_false', 'pos_total', 'neg_true', 'neg_false', 'neg_total']]
+    df_class = df_results[['pos_true', 'pos_false', 'pos_total', 'neg_false', 'neg_true', 'neg_total', 'num_total']]
     df_regre = df_results[['loss_ce', 'delta_z','delta_h','delta_w','delta_d']]
     print('Training results:')
     print('-'*30)
@@ -212,7 +223,7 @@ def test_epoch(config, net, loss, epoch, data_dir):
         output = net(data, coord)
         loss_output = loss(output, target)
         
-        metrics.append(loss_output)
+        metrics.append(loss_output[:13])
 
     metrics = np.asarray(metrics, np.float32)
     loss_total = np.mean(metrics[:,0])
@@ -221,8 +232,8 @@ def test_epoch(config, net, loss, epoch, data_dir):
     neg_true = int(np.sum(metrics[:,8]))
     neg_total = int(np.sum(metrics[:,9]))
     
-    pos_margin = int(np.sum(metrics[:,10]))
-    neg_margin = int(np.sum(metrics[:,11]))
+    pos_margin = int(np.sum(metrics[:,11]))
+    neg_margin = int(np.sum(metrics[:,12]))
 
     print('-'*30)
     print('Validation Results:')

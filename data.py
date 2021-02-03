@@ -42,7 +42,7 @@ class TrainDataset(Dataset):
 
         image_path = self.filenames[patient_idx]
         offset = 0.0
-        scale = 100.0
+        scale = 1.0
         image = load_image(image_path, offset, scale)
         
         # rotate image and labels as well
@@ -86,7 +86,7 @@ class TestDataset(Dataset):
         np.random.seed(3)  
 
         offset = 0. #-535.85
-        scale = 100. #846.87
+        scale = 1. #846.87
         imgs = load_image(self.filenames[idx], offset, scale)
         
         nz, nh, nw = imgs.shape[1:]

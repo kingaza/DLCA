@@ -139,8 +139,6 @@ class Loss(nn.Module):
         output = output.view(-1, 5)
         labels = labels.view(-1, 5)
 
-        threshold = np.abs(np.clip(np.random.normal(0, 0.2, 1), -0.5, 0.5)[0])
-
         pos_idcs = labels[:, 0] > 0.5
         pos_idcs = pos_idcs.unsqueeze(1).expand(pos_idcs.size(0), 5)
         pos_output = output[pos_idcs].view(-1, 5)
@@ -154,6 +152,7 @@ class Loss(nn.Module):
             neg_output, neg_labels = hard_mining(neg_output, neg_labels, self.num_hard * batch_size)
         neg_prob = self.sigmoid(neg_output)
 
+        pos_preds = []
         if len(pos_output)>0:
             pos_prob = self.sigmoid(pos_output[:, 0])
             pz, ph, pw, pd = pos_output[:, 1], pos_output[:, 2], pos_output[:, 3], pos_output[:, 4]
@@ -167,7 +166,9 @@ class Loss(nn.Module):
             classify_loss = 0.5 * self.classify_loss(pos_prob, pos_labels[:, 0]) + \
                             0.5 * self.classify_loss(neg_prob, neg_labels + 1)
                             
-            pos_probs = pos_prob.detach().cpu().numpy()                
+            pos_probs = pos_prob.detach().cpu().numpy()   
+            pos_preds = list(pos_probs)
+
             pos_true = (pos_probs >= 0.5).sum()
             pos_margin = ((pos_probs>self.margin_range[0]) & (pos_probs<0.5)).sum()
             pos_total = len(pos_prob)
@@ -201,9 +202,11 @@ class Loss(nn.Module):
             loss += regress_loss
         
         neg_probs = neg_prob.detach().cpu().numpy()
-        neg_true = (neg_probs < 0.5).sum()
+        neg_false = (neg_probs < 0.5).sum()
         neg_margin = ((neg_probs>0.5) & (neg_probs<self.margin_range[1])).sum()
         neg_total = len(neg_prob)
+
+        num_total = len(labels[:, 0])
 
         # np.set_printoptions(precision=2, suppress=True)
         # print('positive labels', pos_labels.detach().cpu().numpy())
@@ -213,9 +216,12 @@ class Loss(nn.Module):
         # print('positive:', 0 if len(pos_output)==0 else pos_true.detach().cpu().numpy(), '/', pos_total)        
         # print('negative:', 0 if len(neg_output)==0 else neg_true.detach().cpu().numpy(), '/', neg_total)    
 
-        total_losses = [loss, classify_loss_data] + regress_losses_data + [pos_true, pos_total, neg_true, neg_total]
-        
-        return total_losses + [pos_margin, neg_margin]
+        # len=6
+        total_losses = [loss, classify_loss_data] + regress_losses_data
+        # len=7+preds
+        loss_info = [pos_true, pos_total, neg_false, neg_total, num_total, pos_margin, neg_margin] + pos_preds
+
+        return total_losses + loss_info
 
 
 class GetPBB(object):
